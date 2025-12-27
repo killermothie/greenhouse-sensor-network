@@ -3,7 +3,7 @@ services:
     name: greenhouse-sensor-api
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: bash start.sh
+    startCommand: python main.py
     envVars:
       - key: DATABASE_URL
         value: sqlite:///./greenhouse.db
