@@ -148,6 +148,31 @@ async def health_check():
     }
 
 
+@app.get("/status")
+async def status_endpoint():
+    """
+    Status endpoint for compatibility with ESP32 gateway local API.
+    
+    This endpoint provides basic status information and redirects callers
+    to use the proper API endpoints:
+    - For system status: GET /api/sensors/status
+    - For gateway status: GET /api/gateway/status?gateway_id=xxx
+    """
+    import os
+    return {
+        "status": "online",
+        "service": "greenhouse-sensor-api",
+        "version": "1.0.0",
+        "environment": "production" if os.getenv("PORT") else "local",
+        "timestamp": datetime.utcnow().isoformat(),
+        "endpoints": {
+            "system_status": "/api/sensors/status",
+            "gateway_status": "/api/gateway/status",
+            "health": "/health"
+        }
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     import os

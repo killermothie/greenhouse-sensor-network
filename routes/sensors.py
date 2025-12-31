@@ -1,4 +1,5 @@
 """API routes for sensor data endpoints."""
+import asyncio
 import logging
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -256,11 +257,22 @@ async def get_system_status(db: Session = Depends(get_db)):
             gateway_id = list(_esp32_ip_cache.keys())[0]
             gateway_ip = _esp32_ip_cache[gateway_id]
         
-        # Fetch active nodes from gateway if available
-        gateway_active_nodes = await fetch_gateway_active_nodes(gateway_ip)
-        if gateway_active_nodes is not None:
-            stats["nodes_active"] = gateway_active_nodes
-            logger.info(f"Using gateway active nodes count: {gateway_active_nodes}")
+        # Fetch active nodes from gateway if available (non-blocking, fast timeout)
+        # Use asyncio.wait_for with short timeout to avoid blocking the response
+        try:
+            gateway_active_nodes = await asyncio.wait_for(
+                fetch_gateway_active_nodes(gateway_ip),
+                timeout=0.5  # Very short timeout - don't block if gateway unreachable
+            )
+            if gateway_active_nodes is not None:
+                stats["nodes_active"] = gateway_active_nodes
+                logger.info(f"Using gateway active nodes count: {gateway_active_nodes}")
+        except asyncio.TimeoutError:
+            # Gateway not reachable quickly, use database count
+            logger.debug("Gateway fetch timed out, using database node count")
+        except Exception as e:
+            # Gateway fetch failed, use database count
+            logger.debug(f"Gateway fetch failed: {str(e)}, using database node count")
         
         return SystemStatusResponse(**stats)
     except Exception as e:

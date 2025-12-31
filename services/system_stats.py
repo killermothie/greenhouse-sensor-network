@@ -24,22 +24,18 @@ def increment_message_count():
 
 async def fetch_gateway_active_nodes(gateway_ip: str = None) -> int | None:
     """Fetch active node count from gateway if available."""
-    # IPs to try: provided IP, cached IP, common AP IP
+    # IPs to try: provided IP, common AP IP
     ips_to_try = []
     
     if gateway_ip:
         ips_to_try.append(gateway_ip)
     
-    # Try cached IPs
-    for cached_ip in _gateway_ip_cache.values():
-        if cached_ip not in ips_to_try:
-            ips_to_try.append(cached_ip)
-    
-    # Try common AP IP
+    # Try common AP IP as fallback
     if '192.168.4.1' not in ips_to_try:
         ips_to_try.append('192.168.4.1')
     
-    async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+    # Use shorter timeout to avoid blocking the API response
+    async with httpx.AsyncClient(timeout=httpx.Timeout(0.5)) as client:
         for ip in ips_to_try:
             try:
                 url = f"http://{ip}/nodes"
