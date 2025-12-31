@@ -170,26 +170,39 @@ async def check_connectivity():
     return Response(status_code=200)
 
 
-@router.get("/latest", response_model=LatestReadingResponse)
-async def get_latest_reading(db: Session = Depends(get_db)):
+@router.get("/latest", response_model=LatestReadingsResponse)
+async def get_latest_readings(
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of readings to return"),
+    sensor_id: Optional[str] = Query(None, description="Filter by sensor/node ID"),
+    db: Session = Depends(get_db)
+):
     """
-    Get the most recent sensor reading only.
+    Get the latest sensor readings.
     
-    Returns the single most recent sensor reading with all fields including
-    node_id, temperature, humidity, soil_moisture, battery_level, rssi,
-    timestamp, and age_seconds.
+    Returns the most recent sensor readings with all fields including
+    sensor_id, temperature, humidity, soil_moisture, battery_level, rssi,
+    and timestamp.
+    
+    **Query Parameters:**
+    - `limit`: Maximum number of readings (1-100, default: 10)
+    - `sensor_id`: Optional filter by specific sensor/node ID
     
     **Example Response:**
     ```json
     {
-        "node_id": "gateway-01",
-        "temperature": 25.5,
-        "humidity": 65.0,
-        "soil_moisture": 45.0,
-        "battery_level": 85,
-        "rssi": -65,
-        "timestamp": "2024-01-15T10:30:00",
-        "age_seconds": 120
+        "readings": [
+            {
+                "id": 1,
+                "sensor_id": "gateway-01",
+                "temperature": 25.5,
+                "humidity": 65.0,
+                "soil_moisture": 45.0,
+                "battery_level": 85,
+                "rssi": -65,
+                "timestamp": "2024-01-15T10:30:00"
+            }
+        ],
+        "count": 1
     }
     ```
     
@@ -197,33 +210,34 @@ async def get_latest_reading(db: Session = Depends(get_db)):
     - 404: No sensor data exists yet
     """
     try:
-        # Get the most recent reading
-        latest = SensorService.get_latest_readings(db, limit=1)
+        # Get the latest readings with optional filtering
+        latest = SensorService.get_latest_readings(
+            db,
+            limit=limit,
+            node_id=sensor_id
+        )
         
         if not latest or len(latest) == 0:
-            raise HTTPException(
-                status_code=404,
-                detail="No sensor data exists yet. Please submit sensor data first."
+            # Return empty list instead of 404 for better compatibility
+            return LatestReadingsResponse(
+                readings=[],
+                count=0
             )
         
-        reading = latest[0]
-        current_time = datetime.utcnow()
-        age_seconds = int((current_time - reading.timestamp).total_seconds())
+        # Convert to response models
+        reading_responses = [
+            SensorReadingResponse.model_validate(reading)
+            for reading in latest
+        ]
         
-        return LatestReadingResponse(
-            node_id=reading.node_id,
-            temperature=reading.temperature,
-            humidity=reading.humidity,
-            soil_moisture=reading.soil_moisture,
-            battery_level=reading.battery_level,
-            rssi=reading.rssi,
-            timestamp=reading.timestamp,
-            age_seconds=age_seconds
+        return LatestReadingsResponse(
+            readings=reading_responses,
+            count=len(reading_responses)
         )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching latest reading: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching latest readings: {str(e)}")
 
 
 @router.get("/status", response_model=SystemStatusResponse)
