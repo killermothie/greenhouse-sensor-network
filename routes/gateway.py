@@ -107,8 +107,22 @@ async def update_gateway_status(
         if not gateway_id:
             raise HTTPException(status_code=400, detail="gatewayId is required")
         
-        # Update gateway last_seen
-        GatewayService.register_or_update_gateway(db, gateway_id)
+        # Get ESP32's self-reported local IP
+        local_ip = data.get("localIp") or data.get("local_ip")
+        client_ip = request.client.host if request.client else None
+        
+        # Update gateway with IP addresses
+        GatewayService.register_or_update_gateway(
+            db, 
+            gateway_id,
+            local_ip=local_ip,
+            client_ip=client_ip
+        )
+        
+        # Update cache with local IP if provided
+        if local_ip and local_ip != "0.0.0.0":
+            _esp32_ip_cache[gateway_id] = local_ip
+            logger.info(f"Gateway {gateway_id} local IP updated: {local_ip}")
         
         # Cache the gateway status
         _gateway_status_cache[gateway_id] = {
@@ -121,7 +135,8 @@ async def update_gateway_status(
         logger.info(
             f"Gateway status updated: {gateway_id}, "
             f"active_nodes={data.get('activeNodeCount', 0)}, "
-            f"mode={data.get('networkMode', 'UNKNOWN')}"
+            f"mode={data.get('networkMode', 'UNKNOWN')}, "
+            f"local_ip={local_ip or 'not provided'}"
         )
         
         return {

@@ -19,7 +19,9 @@ class GatewayService:
     def register_or_update_gateway(
         db: Session,
         gateway_id: str,
-        name: Optional[str] = None
+        name: Optional[str] = None,
+        local_ip: Optional[str] = None,
+        client_ip: Optional[str] = None
     ) -> Gateway:
         """Register a new gateway or update existing gateway's last_seen timestamp.
         
@@ -27,6 +29,8 @@ class GatewayService:
             db: Database session
             gateway_id: Unique gateway identifier
             name: Optional human-readable name
+            local_ip: ESP32's self-reported local IP address
+            client_ip: IP address seen by backend (for diagnostics)
             
         Returns:
             Gateway object (new or existing)
@@ -39,19 +43,38 @@ class GatewayService:
             gateway.is_online = True
             if name:
                 gateway.name = name
+            if local_ip and local_ip != "0.0.0.0":
+                gateway.local_ip = local_ip
+            if client_ip:
+                gateway.client_ip = client_ip
         else:
             # Create new gateway
             gateway = Gateway(
                 gateway_id=gateway_id,
                 name=name or f"Gateway {gateway_id}",
                 is_online=True,
-                last_seen=datetime.utcnow()
+                last_seen=datetime.utcnow(),
+                local_ip=local_ip if local_ip and local_ip != "0.0.0.0" else None,
+                client_ip=client_ip
             )
             db.add(gateway)
         
         db.commit()
         db.refresh(gateway)
         return gateway
+    
+    @staticmethod
+    def get_gateway(db: Session, gateway_id: str) -> Optional[Gateway]:
+        """Get gateway object by ID.
+        
+        Args:
+            db: Database session
+            gateway_id: Gateway identifier
+            
+        Returns:
+            Gateway object or None if not found
+        """
+        return db.query(Gateway).filter(Gateway.gateway_id == gateway_id).first()
 
     @staticmethod
     def register_or_update_node(
@@ -130,7 +153,9 @@ class GatewayService:
             "is_online": is_online,
             "last_seen": gateway.last_seen.isoformat(),
             "last_seen_seconds_ago": int(time_since_last_seen),
-            "created_at": gateway.created_at.isoformat()
+            "created_at": gateway.created_at.isoformat(),
+            "local_ip": gateway.local_ip,  # ESP32's self-reported IP (source of truth)
+            "client_ip": gateway.client_ip  # IP seen by backend (for diagnostics)
         }
 
     @staticmethod

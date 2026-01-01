@@ -19,6 +19,7 @@ from models.schemas import (
 )
 from services.sensor_service import SensorService
 from services.system_stats import get_system_stats, increment_message_count, fetch_gateway_active_nodes
+from routes.gateway import _gateway_status_cache
 
 logger = logging.getLogger(__name__)
 # Router with both v1 and legacy support
@@ -71,13 +72,29 @@ async def receive_sensor_data(
     gateway_id = sensor_data.get_gateway_id()
     node_id = sensor_data.get_sensor_id()
     
-    # Store the ESP32's IP address from the request for later use
+    # ✅ CORRECT: Use ESP32's self-reported local IP (what it shows on OLED)
+    local_ip = sensor_data.get_local_ip()
+    # Also store client IP for diagnostics (what backend sees)
     client_ip = request.client.host if request.client else None
-    if client_ip:
+    
+    # Store ESP32's actual local IP (source of truth)
+    if local_ip and local_ip != "0.0.0.0":
+        _esp32_ip_cache[gateway_id] = local_ip
+        logger.info(f"ESP32 {gateway_id} reports local IP: {local_ip} (backend sees client IP: {client_ip})")
+    elif client_ip:
+        # Fallback: use client IP if ESP32 didn't send local_ip (legacy support)
         _esp32_ip_cache[gateway_id] = client_ip
-        logger.debug(f"Cached ESP32 IP for gateway {gateway_id}: {client_ip}")
+        logger.warning(f"ESP32 {gateway_id} didn't send local_ip, using client IP: {client_ip}")
     
     try:
+        # Register/update gateway with IP addresses
+        GatewayService.register_or_update_gateway(
+            db, 
+            gateway_id,
+            local_ip=local_ip,
+            client_ip=client_ip
+        )
+        
         # Strict validation of sensor payload
         if sensor_data.temperature < -50 or sensor_data.temperature > 100:
             logger.warning(
@@ -262,14 +279,24 @@ async def get_system_status(db: Session = Depends(get_db)):
     try:
         stats = get_system_stats(db)
         
-        # Try to fetch active nodes from gateway (sync with gateway)
-        gateway_ip = None
+        # First, try to get active nodes from gateway status cache (sent by gateway via POST /api/gateway/status)
         gateway_id = None
-        
-        # Try to get gateway IP from cache
         if _esp32_ip_cache:
             gateway_id = list(_esp32_ip_cache.keys())[0]
-            gateway_ip = _esp32_ip_cache[gateway_id]
+        
+        # Check gateway status cache first (most reliable - sent by gateway)
+        if gateway_id and gateway_id in _gateway_status_cache:
+            cached_status = _gateway_status_cache[gateway_id]
+            cached_active_nodes = cached_status.get("active_node_count")
+            if cached_active_nodes is not None:
+                stats["nodes_active"] = cached_active_nodes
+                logger.info(f"Using cached gateway active nodes count from gateway status: {cached_active_nodes}")
+                return SystemStatusResponse(**stats)
+        
+        # Fallback: Try to fetch active nodes from gateway directly (if cache not available)
+        gateway_ip = None
+        if gateway_id:
+            gateway_ip = _esp32_ip_cache.get(gateway_id)
         
         # Fetch active nodes from gateway if available (non-blocking, fast timeout)
         # Use asyncio.wait_for with short timeout to avoid blocking the response
@@ -280,12 +307,12 @@ async def get_system_status(db: Session = Depends(get_db)):
             )
             if gateway_active_nodes is not None:
                 stats["nodes_active"] = gateway_active_nodes
-                logger.info(f"Using gateway active nodes count: {gateway_active_nodes}")
+                logger.info(f"Using gateway active nodes count from direct fetch: {gateway_active_nodes}")
         except asyncio.TimeoutError:
-            # Gateway not reachable quickly, use database count
+            # Gateway not reachable quickly, use database count (already set in stats)
             logger.debug("Gateway fetch timed out, using database node count")
         except Exception as e:
-            # Gateway fetch failed, use database count
+            # Gateway fetch failed, use database count (already set in stats)
             logger.debug(f"Gateway fetch failed: {str(e)}, using database node count")
         
         return SystemStatusResponse(**stats)

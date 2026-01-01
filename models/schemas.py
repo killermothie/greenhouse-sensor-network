@@ -33,6 +33,10 @@ class SensorDataInput(BaseModel):
     rssi: Optional[int] = Field(None, description="RSSI signal strength")
     timestamp: Optional[int] = Field(None, description="Unix timestamp from ESP32")
     
+    # ESP32's self-reported local IP address (what it displays on OLED)
+    localIp: Optional[str] = Field(None, description="ESP32's local IP address (self-reported)")
+    local_ip: Optional[str] = Field(None, description="Alternative field name for local IP")
+    
     # Optional standard field
     light_level: Optional[float] = Field(None, ge=0, description="Light level (lux)")
 
@@ -51,6 +55,10 @@ class SensorDataInput(BaseModel):
         if self.soil_moisture is not None:
             return self.soil_moisture
         raise ValueError("soil_moisture or soilMoisture must be provided")
+    
+    def get_local_ip(self) -> Optional[str]:
+        """Get local IP from either localIp or local_ip."""
+        return self.localIp or self.local_ip
     
     @model_validator(mode='after')
     def validate_required_fields(self):

@@ -12,6 +12,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Database URL - can be overridden by environment variable
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./greenhouse.db")
@@ -40,6 +43,11 @@ class Gateway(Base):
     is_online = Column(Boolean, default=False, nullable=False)
     last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # IP addresses: local_ip is ESP32's self-reported IP (source of truth)
+    # client_ip is what backend sees (for diagnostics/network troubleshooting)
+    local_ip = Column(String(15), nullable=True, comment="ESP32's self-reported local IP (from OLED)")
+    client_ip = Column(String(15), nullable=True, comment="IP address seen by backend (for diagnostics)")
     
     # Relationships
     sensor_nodes = relationship("SensorNode", back_populates="gateway", cascade="all, delete-orphan")
@@ -119,9 +127,38 @@ def init_db():
     This function:
     1. Creates all tables if they don't exist
     2. Migrates existing sensor_readings table to add gateway_id and node_id
-    3. Handles backward compatibility with existing data
+    3. Adds IP address columns to gateways table (local_ip, client_ip)
+    4. Handles backward compatibility with existing data
     """
     Base.metadata.create_all(bind=engine)
+    
+    # Migration: Add IP address columns to gateways table
+    with engine.connect() as conn:
+        try:
+            # Check if local_ip column exists
+            conn.execute(text("SELECT local_ip FROM gateways LIMIT 1"))
+            conn.commit()
+        except Exception:
+            # Add local_ip column
+            try:
+                conn.execute(text("ALTER TABLE gateways ADD COLUMN local_ip VARCHAR(15)"))
+                conn.commit()
+                logger.info("Added local_ip column to gateways table")
+            except Exception as e:
+                logger.warning(f"Could not add local_ip column (may already exist): {e}")
+        
+        try:
+            # Check if client_ip column exists
+            conn.execute(text("SELECT client_ip FROM gateways LIMIT 1"))
+            conn.commit()
+        except Exception:
+            # Add client_ip column
+            try:
+                conn.execute(text("ALTER TABLE gateways ADD COLUMN client_ip VARCHAR(15)"))
+                conn.commit()
+                logger.info("Added client_ip column to gateways table")
+            except Exception as e:
+                logger.warning(f"Could not add client_ip column (may already exist): {e}")
     
     # Migration logic for existing databases
     with engine.connect() as conn:
@@ -183,6 +220,40 @@ def init_db():
                         conn.commit()
                     except Exception:
                         pass
+    
+    # Migration: Add IP address columns to gateways table
+    with engine.connect() as conn:
+        # Check if gateways table exists
+        result = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='gateways'")
+        )
+        if result.fetchone():
+            # Table exists, check for new columns
+            try:
+                # Check if local_ip column exists
+                conn.execute(text("SELECT local_ip FROM gateways LIMIT 1"))
+                conn.commit()
+            except Exception:
+                # Add local_ip column
+                try:
+                    conn.execute(text("ALTER TABLE gateways ADD COLUMN local_ip VARCHAR(15)"))
+                    conn.commit()
+                    logger.info("Added local_ip column to gateways table")
+                except Exception as e:
+                    logger.warning(f"Could not add local_ip column (may already exist): {e}")
+            
+            try:
+                # Check if client_ip column exists
+                conn.execute(text("SELECT client_ip FROM gateways LIMIT 1"))
+                conn.commit()
+            except Exception:
+                # Add client_ip column
+                try:
+                    conn.execute(text("ALTER TABLE gateways ADD COLUMN client_ip VARCHAR(15)"))
+                    conn.commit()
+                    logger.info("Added client_ip column to gateways table")
+                except Exception as e:
+                    logger.warning(f"Could not add client_ip column (may already exist): {e}")
 
 
 def get_db():
