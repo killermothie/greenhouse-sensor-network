@@ -18,6 +18,7 @@ from models.schemas import (
     HistoryResponse
 )
 from services.sensor_service import SensorService
+from services.gateway_service import GatewayService
 from services.system_stats import get_system_stats, increment_message_count, fetch_gateway_active_nodes
 from routes.gateway import _gateway_status_cache
 
