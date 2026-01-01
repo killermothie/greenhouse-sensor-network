@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import List, Optional
 from datetime import datetime, timedelta
+import logging
 from models.database import Gateway, SensorNode
+
+logger = logging.getLogger(__name__)
 
 
 class GatewayService:
@@ -37,30 +40,60 @@ class GatewayService:
         """
         gateway = db.query(Gateway).filter(Gateway.gateway_id == gateway_id).first()
         
-        if gateway:
-            # Update existing gateway
-            gateway.last_seen = datetime.utcnow()
-            gateway.is_online = True
-            if name:
-                gateway.name = name
-            if local_ip and local_ip != "0.0.0.0":
-                gateway.local_ip = local_ip
-            if client_ip:
-                gateway.client_ip = client_ip
-        else:
-            # Create new gateway
-            gateway = Gateway(
-                gateway_id=gateway_id,
-                name=name or f"Gateway {gateway_id}",
-                is_online=True,
-                last_seen=datetime.utcnow(),
-                local_ip=local_ip if local_ip and local_ip != "0.0.0.0" else None,
-                client_ip=client_ip
-            )
-            db.add(gateway)
+        try:
+            if gateway:
+                # Update existing gateway
+                gateway.last_seen = datetime.utcnow()
+                gateway.is_online = True
+                if name:
+                    gateway.name = name
+                # Try to set IP fields if columns exist (migration might not have run yet)
+                if local_ip and local_ip != "0.0.0.0":
+                    if hasattr(gateway, 'local_ip'):
+                        gateway.local_ip = local_ip
+                if client_ip:
+                    if hasattr(gateway, 'client_ip'):
+                        gateway.client_ip = client_ip
+            else:
+                # Create new gateway
+                gateway_params = {
+                    'gateway_id': gateway_id,
+                    'name': name or f"Gateway {gateway_id}",
+                    'is_online': True,
+                    'last_seen': datetime.utcnow(),
+                }
+                # Only add IP fields if columns exist in the model
+                if hasattr(Gateway, 'local_ip') and local_ip and local_ip != "0.0.0.0":
+                    gateway_params['local_ip'] = local_ip
+                if hasattr(Gateway, 'client_ip') and client_ip:
+                    gateway_params['client_ip'] = client_ip
+                
+                gateway = Gateway(**gateway_params)
+                db.add(gateway)
+            
+            db.commit()
+            db.refresh(gateway)
+        except Exception as e:
+            # If there's a database error (e.g., columns don't exist), rollback and retry without IP fields
+            db.rollback()
+            if not gateway:
+                # Create gateway without IP fields
+                gateway = Gateway(
+                    gateway_id=gateway_id,
+                    name=name or f"Gateway {gateway_id}",
+                    is_online=True,
+                    last_seen=datetime.utcnow()
+                )
+                db.add(gateway)
+            else:
+                gateway.last_seen = datetime.utcnow()
+                gateway.is_online = True
+                if name:
+                    gateway.name = name
+            db.commit()
+            db.refresh(gateway)
+            logger.warning(f"Gateway updated without IP fields (migration may not have run): {e}")
         
-        db.commit()
-        db.refresh(gateway)
         return gateway
     
     @staticmethod
