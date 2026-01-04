@@ -10,11 +10,24 @@ from slowapi.errors import RateLimitExceeded
 from models.database import init_db
 from routes import sensors, insights, ai, gateway
 
+# Configure logging with custom formatter to handle missing gateway_id
+class GatewayIdFormatter(logging.Formatter):
+    """Custom formatter that handles missing gateway_id gracefully."""
+    def format(self, record):
+        # Ensure gateway_id exists in record
+        if not hasattr(record, 'gateway_id'):
+            record.gateway_id = 'unknown'
+        return super().format(record)
+
 # Configure logging
+handler = logging.StreamHandler()
+handler.setFormatter(GatewayIdFormatter(
+    fmt='%(asctime)s - %(name)s - %(levelname)s - [gateway_id=%(gateway_id)s] - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+))
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - [gateway_id=%(gateway_id)s] - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    handlers=[handler]
 )
 logger = logging.getLogger(__name__)
 
