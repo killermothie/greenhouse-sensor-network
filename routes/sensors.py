@@ -291,7 +291,10 @@ async def get_system_status(db: Session = Depends(get_db)):
             cached_active_nodes = cached_status.get("active_node_count")
             if cached_active_nodes is not None:
                 stats["nodes_active"] = cached_active_nodes
-                logger.info(f"Using cached gateway active nodes count from gateway status: {cached_active_nodes}")
+                logger.info(
+                    f"Using cached gateway active nodes count from gateway status: {cached_active_nodes} "
+                    f"(gateway_id={gateway_id}, cache={_gateway_status_cache})"
+                )
                 return SystemStatusResponse(**stats)
         
         # Fallback: Try to fetch active nodes from gateway directly (if cache not available)
